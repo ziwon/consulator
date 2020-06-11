@@ -1,0 +1,4 @@
+python-consul
+shortuuid
+netifaces
+loguru
