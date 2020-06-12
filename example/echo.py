@@ -16,14 +16,16 @@ def listen():
     app_port = int(os.getenv('PORT', 8000))
     app_id = shortuuid.ShortUUID().random(length=4)
     app_tags = os.getenv('SERVICE_TAG', 'active')
+    app_bind_interface = os.getenv('BIND_INTERFACE', 'eth0')
 
-    consulator = Consulator(consul_url)
+    consulator = Consulator(consul_url, app_bind_interface)
     consulator.register_service(
         service_name='echo',
         service_id=f'echo-{app_id}',
         service_port=app_port,
         service_tags=[app_tags])
     consulator.create_session()
+    consulator.take_leader()
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

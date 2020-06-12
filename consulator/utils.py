@@ -1,5 +1,7 @@
 import netifaces
 
 
-def get_host_ip(interface_name):
-    return netifaces.ifaddresses(interface_name)[netifaces.AF_INET][0]["addr"]
+ def get_host_ip(interface_name):
+    addrs = netifaces.ifaddresses(interface_name)
+    ips = [x['addr'] for x in addrs[netifaces.AF_INET]]
+    return ips[0]

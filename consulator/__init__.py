@@ -1,31 +1,40 @@
+import time
 import socket
 import consul
-import time
+import netifaces
+
 from loguru import logger
 from six.moves.urllib.parse import urlparse
 
 from consulator.utils import get_host_ip
 from consulator.exception import *
 
+
+SESSION_TTL=86400 # between 10 and 86400 seconds
+LOCK_DELAY=0.001
+
 class Consulator(object):
-    def __init__(self, consul_url, **kwargs):
+    def __init__(self, consul_url, bind_interface, **kwargs):
         url = urlparse(consul_url)
-        self._consul = consul.Consul(host=url.hostname, port=url.port, **kwargs)
-        self._bind_interface = kwargs['bind_interface'] if 'bind_interface' in kwargs else "eth0"
-        self._check_interval = kwargs['check_interval'] if 'check_interval' in kwargs else '5s' 
+        self._consul = consul.Consul(host=url.hostname, port=url.port or 80, **kwargs)
+        self._bind_interface = bind_interface
+        self._check_interval = kwargs.pop('check_interval', '5s')
         self._session = None
+        self._last_session_refresh = 0
         self.__session_checks = None
         
     def register_service(self, service_name, service_id, service_host=None, service_port=None, service_tags=[]):
         self._name = service_name
+        self._leader_path = f"{service_name}/leader"
+        logger.debug(f"bind_interface: {self._bind_interface}")
         service_host = service_host or get_host_ip(self._bind_interface)
         service = self._consul.agent.service
         check = consul.Check.tcp(service_host, service_port, self._check_interval)
         res = service.register(service_name, service_id, address=service_host, port=service_port, check=check, tags=service_tags)
         if res:
-            logger.info(f'Register service: {service_name}({service_id})')
+            logger.info(f'Registered service: {service_name}({service_id})')
         else:
-            logger.error(f'Register failed: {service_name}({service_id})')
+            logger.error(f'Registering failed: {service_name}({service_id})')
 
     def create_session(self):
         while not self._session:
@@ -42,12 +51,22 @@ class Consulator(object):
             logger.exception("refresh_session")
         raise ConsulError("Failed to renew/create session")
 
+    def take_leader(self):
+        try:
+            is_leader = self._consul.kv.put(self._leader_path, self._name, acquire=self._session)
+            logger.info(f"Leader: {is_leader}")
+        except InvalidSession as e:
+            logger.error(f"Could not take out TTL lock: {e}")
+            self._sssion = None
+
     def _do_refresh_session(self):
         if self._session and self._last_session_refresh + 5 > time.time():
+            logger.debug(f"sessoin is None, time condition not matched")
             return False
 
         if self._session:
             try:
+                logger.debug(f"renew sessoin")
                 self._consul.session.renew(self._session)
             except consul.NotFound:
                 self._session = None
@@ -55,9 +74,8 @@ class Consulator(object):
         if not self._session:
             try:
                 self._session = self._consul.session.create(
-                    name=self._name,
-                    checks=self.__session_checks or [],
-                    lock_delay=0.001,
+                    name=self._name, # distributed lock
+                    ttl=SESSION_TTL,
                     behavior="delete",
                 )
                 logger.info(f"sessoin: {self._session}")
