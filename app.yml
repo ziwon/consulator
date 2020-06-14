@@ -1,0 +1,25 @@
+version: '3'
+
+services:
+  app1:
+    build: .
+    ports:
+      - 8000:8000
+    env_file:
+      - ./example/app1.env
+    deploy:
+      restart_policy:
+        condition: always
+
+  app2:
+    build: .
+    ports:
+      - 8001:8001
+    env_file:
+      - ./example/app2.env
+    deploy:
+      restart_policy:
+        condition: always
+
+  tool: 
+    image: praqma/network-multitool
