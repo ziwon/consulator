@@ -23,6 +23,5 @@ RUN apk add --no-cache curl
 RUN mkdir /app
 WORKDIR /app
 ADD . .
-EXPOSE $PORT
 ENV PATH="/opt/venv/bin:$PATH"
 ENTRYPOINT ["./docker-entry.sh"]

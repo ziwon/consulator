@@ -1,30 +1,39 @@
 import time
+import signal
+import atexit
 import socket
 import consul
 import netifaces
 
 from loguru import logger
 from six.moves.urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor
 
 from consulator.utils import get_host_ip
 from consulator.exception import *
 
-
-SESSION_TTL=86400 # between 10 and 86400 seconds
-LOCK_DELAY=0.001
+TASK_WORKERS=2
+DEFAULT_CHECK_INTERVAL='5s'
+DEFAULT_SESSION_TTL=10 # 10s
+DEFAULT_LOCK_DELAY=0.001
+DEFAULT_SESSION_REFRESH_TIMEOUT=5.0
 
 class Consulator(object):
     def __init__(self, consul_url, bind_interface, **kwargs):
         url = urlparse(consul_url)
         self._consul = consul.Consul(host=url.hostname, port=url.port or 80, **kwargs)
         self._bind_interface = bind_interface
-        self._check_interval = kwargs.pop('check_interval', '5s')
+        self._check_interval = kwargs.pop('check_interval', DEFAULT_CHECK_INTERVAL)
         self._session = None
-        self._last_session_refresh = 0
-        self.__session_checks = None
-        
+        self._workers = ThreadPoolExecutor(max_workers=TASK_WORKERS)
+
+        signal.signal(signal.SIGINT, self.deregister)
+        atexit.register(self.deregister)
+       
     def register_service(self, service_name, service_id, service_host=None, service_port=None, service_tags=[]):
-        self._name = service_name
+        logger.debug(f"service_name: {service_name}, service_id: {service_id}, service_host: {service_host}, service_port: {service_port}")
+        self._service_name = service_name
+        self._service_id = service_id
         self._leader_path = f"{service_name}/leader"
         logger.debug(f"bind_interface: {self._bind_interface}")
         service_host = service_host or get_host_ip(self._bind_interface)
@@ -42,67 +51,64 @@ class Consulator(object):
                 logger.info("Trying to refresh session")
                 self.refresh_session()
             except ConsulError:
-                time.sleep(5)
+                time.sleep(1)
 
     def refresh_session(self):
+        logger.info("Refresh session")
         try:
-            self._do_refresh_session()
+            self._workers.submit(self._do_refresh_session)
         except (ConsulException):
             logger.exception("refresh_session")
         raise ConsulError("Failed to renew/create session")
 
+    def update_leader(self):
+        logger.info("Update leader")
+        time.sleep(10)
+        self._workers.submit(self.take_leader)
+
     def take_leader(self):
-        try:
-            is_leader = self._consul.kv.put(self._leader_path, self._name, acquire=self._session)
-            logger.info(f"Leader: {is_leader}")
-        except InvalidSession as e:
-            logger.error(f"Could not take out TTL lock: {e}")
-            self._sssion = None
+        while True:
+            try:
+                is_leader = self._consul.kv.put(
+                    self._leader_path, 
+                    self._service_id, 
+                    acquire=self._session)
+                logger.info(f"Leader: {is_leader}")
+            except InvalidSession as e:
+                logger.error(f"Could not take out TTL lock: {e}")
+                self._sssion = None
+            
+            time.sleep(DEFAULT_SESSION_REFRESH_TIMEOUT)
 
     def _do_refresh_session(self):
-        if self._session and self._last_session_refresh + 5 > time.time():
-            logger.debug(f"sessoin is None, time condition not matched")
-            return False
+        while True:
+            if self._session:
+                try:
+                    logger.debug(f"Renew sessoin")
+                    self._consul.session.renew(self._session)
+                except consul.NotFound:
+                    logger.debug(f"Session not found")
+                    self._session = None
 
-        if self._session:
-            try:
-                logger.debug(f"renew sessoin")
-                self._consul.session.renew(self._session)
-            except consul.NotFound:
-                self._session = None
+            if not self._session:
+                try:
+                    logger.debug(f"Create sessoin")
+                    self._session = self._consul.session.create(
+                        name=self._service_name, # distributed lock
+                        ttl=DEFAULT_SESSION_TTL,
+                        lock_delay=DEFAULT_LOCK_DELAY,
+                        behavior="delete",
+                    )
+                    logger.info(f"Created sessoin: {self._session}")
+                except InvalidSessionTTL:
+                    logger.error(f"Session not created")
 
-        if not self._session:
-            try:
-                self._session = self._consul.session.create(
-                    name=self._name, # distributed lock
-                    ttl=SESSION_TTL,
-                    behavior="delete",
-                )
-                logger.info(f"sessoin: {self._session}")
-            except InvalidSessionTTL:
-                logger.exception("session.create")
-                #self.adjust_ttl()
-                raise
+            time.sleep(DEFAULT_SESSION_REFRESH_TIMEOUT)
 
-        self._last_session_refresh = time.time()
-
-    def adjust_ttl(self):
-        try:
-            settings = self._consul.agent.self()
-            min_ttl = (
-                settings["Config"]["SessionTTLMin"] or 10000000000
-            ) / 1000000000.0
-            logger.warning(
-                "Changing Session TTL from %s to %s", self._consul.http.ttl, min_ttl
-            )
-            self._consul.http.set_ttl(min_ttl)
-        except Exception:
-            logger.exception("adjust_ttl")
-
-    def deregister(self, service_id):
+    def deregister(self):
         service = self._consul.agent.service
-        service.deregister(service_id)
-        logger.info('Deregister service: {}'.format(service_id))
+        service.deregister(self._service_id)
+        logger.info('Deregister service: {}'.format(self._service_id))
 
     def discovery_service(self, service_name):
         catalog = self._consul.catalog
@@ -119,6 +125,3 @@ class Consulator(object):
         for check in checks:
             res[check['ServiceID']] = check
         return res
-
-    def close(self):
-        self._consul.close()

@@ -1,8 +1,5 @@
 #!/bin/sh
 
-export HOST=${HOST:-"localhost"}
-export PORT=${PORT:-"8000"}
-
 set +e
 curl -sv --fail $CONSUL_URL > /dev/null
 ERR=$?
