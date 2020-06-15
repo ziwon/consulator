@@ -41,7 +41,6 @@ def start():
     )
     consulator.create_session()
     consulator.take_leader()
-    consulator.update_leader()
 
     try:
         while True:

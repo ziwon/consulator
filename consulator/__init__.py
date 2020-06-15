@@ -16,7 +16,7 @@ TASK_WORKERS=2
 DEFAULT_CHECK_INTERVAL='5s'
 DEFAULT_SESSION_TTL=10 # 10s
 DEFAULT_LOCK_DELAY=0.001
-DEFAULT_SESSION_REFRESH_TIMEOUT=5.0
+DEFAULT_REFRESH_INTERVALS=5.0
 
 class Consulator(object):
     def __init__(self, consul_url, bind_interface, **kwargs):
@@ -29,7 +29,7 @@ class Consulator(object):
 
         signal.signal(signal.SIGINT, self.deregister)
         atexit.register(self.deregister)
-       
+
     def register_service(self, service_name, service_id, service_host=None, service_port=None, service_tags=[]):
         logger.debug(f"service_name: {service_name}, service_id: {service_id}, service_host: {service_host}, service_port: {service_port}")
         self._service_name = service_name
@@ -61,30 +61,29 @@ class Consulator(object):
             logger.exception("refresh_session")
         raise ConsulError("Failed to renew/create session")
 
-    def update_leader(self):
-        logger.info("Update leader")
-        time.sleep(10)
-        self._workers.submit(self.take_leader)
-
     def take_leader(self):
+        logger.info("Take leader")
+        self._workers.submit(self._do_take_leader)
+
+    def _do_take_leader(self):
         while True:
             try:
                 is_leader = self._consul.kv.put(
-                    self._leader_path, 
-                    self._service_id, 
+                    self._leader_path,
+                    self._service_id,
                     acquire=self._session)
-                logger.info(f"Leader: {is_leader}")
+                logger.debug(f"[{self._service_id}] - Leader: {is_leader}")
             except InvalidSession as e:
                 logger.error(f"Could not take out TTL lock: {e}")
                 self._sssion = None
-            
-            time.sleep(DEFAULT_SESSION_REFRESH_TIMEOUT)
+
+            time.sleep(DEFAULT_REFRESH_INTERVALS)
 
     def _do_refresh_session(self):
         while True:
             if self._session:
                 try:
-                    logger.debug(f"Renew sessoin")
+                    logger.debug(f"[{self._service_id}] - Renew sessoin")
                     self._consul.session.renew(self._session)
                 except consul.NotFound:
                     logger.debug(f"Session not found")
@@ -103,7 +102,7 @@ class Consulator(object):
                 except InvalidSessionTTL:
                     logger.error(f"Session not created")
 
-            time.sleep(DEFAULT_SESSION_REFRESH_TIMEOUT)
+            time.sleep(DEFAULT_REFRESH_INTERVALS)
 
     def deregister(self):
         service = self._consul.agent.service
@@ -117,11 +116,3 @@ class Consulator(object):
         for node in nodes:
             services.append(node)
         return services
-
-    def check_service(self, service_name):
-        health = self._consul.health
-        _, checks = health.checks(service_name)
-        res = {}
-        for check in checks:
-            res[check['ServiceID']] = check
-        return res
