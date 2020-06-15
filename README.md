@@ -1,7 +1,7 @@
-# consulator
+# Consulator
 Simple consul leader election with python
 
-## usage
+## Usage
 
 ```python
 app_host = os.getenv('HOST', '0.0.0.0')
@@ -21,9 +21,13 @@ consulator = Consulator(consul_url, app_bind_interface)
     consulator.take_leader()
 ```
 
-## demo
+## Demo
 
 ```sh
 $ make consul-up
 $ make app-up
 ```
+
+## Todo
+
+- Update dynamically the DNS SRV record of a leader
