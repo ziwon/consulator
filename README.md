@@ -11,14 +11,14 @@ app_tags = os.getenv('SERVICE_TAG', 'v1')
 app_bind_interface = os.getenv('BIND_INTERFACE', 'eth0')
 
 consulator = Consulator(consul_url, app_bind_interface)
-    consulator.register_service(
-        service_name='echo',
-        service_id=f'echo-{app_id}',
-        service_port=app_port,
-        service_tags=[app_tags]
-    )
-    consulator.create_session()
-    consulator.take_leader()
+consulator.register_service(
+    service_name='echo',
+    service_id=f'echo-{app_id}',
+    service_port=app_port,
+    service_tags=[app_tags]
+)
+consulator.create_session()
+consulator.take_leader()
 ```
 
 ## Demo
