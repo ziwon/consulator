@@ -1,4 +1,4 @@
-python-consul
+-e git+https://github.com/criteo-forks/py-consul.git@v1.1.1#egg=python-consul
 shortuuid
 netifaces
 loguru

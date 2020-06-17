@@ -6,7 +6,7 @@ import consul
 import netifaces
 
 from loguru import logger
-from six.moves.urllib.parse import urlparse
+from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 
 from consulator.utils import get_host_ip
@@ -39,7 +39,14 @@ class Consulator(object):
         service_host = service_host or get_host_ip(self._bind_interface)
         service = self._consul.agent.service
         check = consul.Check.tcp(service_host, service_port, self._check_interval)
-        res = service.register(service_name, service_id, address=service_host, port=service_port, check=check, tags=service_tags)
+        res = service.register(
+            service_name,
+            service_id,
+            address=service_host,
+            port=service_port,
+            check=check,
+            meta={"id": service_id},
+            tags=service_tags)
         if res:
             logger.info(f'Registered service: {service_name}({service_id})')
         else:

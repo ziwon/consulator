@@ -2,7 +2,7 @@
 FROM python:3.6.9-alpine AS compile-image
 
 RUN apk --no-cache add --virtual .build-deps \
-    build-base linux-headers libffi-dev libressl-dev curl
+    build-base linux-headers libffi-dev libressl-dev git
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"

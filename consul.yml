@@ -8,12 +8,9 @@ services:
       - CONSUL_CLIENT_LAN_ADDRESS=0.0.0.0
       - CONSUL_DISABLE_KEYRING_FILE=true
       - CONSUL_RETRY_JOIN_ADDRESS=consul1
+      - CONSUL_LOCAL_CONFIG={"addresses":{"dns":"0.0.0.0","http":"0.0.0.0"}}
     ports:
-      - '8300:8300'
-      - '8301:8301'
-      - '8301:8301/udp'
       - '8500:8500'
-      - '8600:8600'
       - '8600:8600/udp'
     volumes:
       - 'consul1_data:/bitnami'
@@ -40,7 +37,6 @@ services:
     volumes:
       - 'consul3_data:/bitnami'
 
-        
 volumes:
   consul1_data:
     driver: local
